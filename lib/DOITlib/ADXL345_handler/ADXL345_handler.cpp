@@ -1,8 +1,11 @@
 #include <ADXL345_handler/ADXL345_handler.h>
 #include <Arduino.h>
 #include <Frame_DMS/Frame_DMS.h>
-#include <SPIFFS_handler/SPIFFS_handler.h>
-#include <encoder_handler/encoder_handler.h>
+
+#ifndef DOIT_LITE
+  #include <SPIFFS_handler/SPIFFS_handler.h>
+  #include <encoder_handler/encoder_handler.h>
+#endif
 
 
 ADXL345Handler adxl345Handler;

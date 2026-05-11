@@ -1,0 +1,14 @@
+{
+  "name": "DOITlib",
+  "version": "1.0.0",
+  "build": {
+    "srcFilter": [
+      "-<*>",
+      "+<ADXL345_handler/>",
+      "+<CommunicatorLite/>",
+      "+<Frame_DMS/>",
+      "+<LiteStorage/>",
+      "+<RoomScannerLite/>"
+    ]
+  }
+}

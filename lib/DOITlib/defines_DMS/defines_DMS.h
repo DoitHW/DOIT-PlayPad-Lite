@@ -55,14 +55,33 @@
 #define BG_BRIGHT_WHITE      "\033[107m"
 
 
-//DELFINES GLOBALES
-//#define BOTONERA_NEW           // -> BOTONERA_OLD / BOTONERA_NEW
+// DELFINES GLOBALES
+// #define BOTONERA_NEW           // -> BOTONERA_OLD / BOTONERA_NEW
 #define NOELEM
-#define BOTONERA
-#define PLAYER                 // -> PLAYER / NOPLAYER
-#define NONFC                    // -> NFC / NONFC
-#define MIC                    // -> MIC / NOMIC
-#define ADXL                   // -> ADXL / NOADXL    
+
+#if defined(DOIT_LITE)
+  #ifndef BOTONERA
+    #define BOTONERA
+  #endif
+  #ifndef NONFC
+    #define NONFC
+  #endif
+  #ifndef NOPLAYER
+    #define NOPLAYER
+  #endif
+  #ifndef NOMIC
+    #define NOMIC
+  #endif
+  #ifndef ADXL
+    #define ADXL
+  #endif
+#else
+  #define BOTONERA
+  #define PLAYER                 // -> PLAYER / NOPLAYER
+  #define NONFC                  // -> NFC / NONFC
+  #define MIC                    // -> MIC / NOMIC
+  #define ADXL                   // -> ADXL / NOADXL
+#endif
 
 constexpr byte DEFAULT_TABLET       = 0xD1;
 constexpr byte DEFAULT_COLOR_PAD    = 0xD2;
@@ -94,8 +113,10 @@ constexpr byte DEFAULT_PAD          = 0xD9;
 
 #define LEGACY_COLOR_SUPPORT
 
-#define DEBUG
-#define DEBUG_
+#if !defined(DOIT_LITE)
+  #define DEBUG
+  #define DEBUG_
+#endif
 #if defined(DEBUG_) && !defined(NODEBUG)
   #define DEBUG__________ln(...)          Serial.println(__VA_ARGS__)
   #define DEBUG__________(...)            Serial.print(__VA_ARGS__)
@@ -153,10 +174,30 @@ constexpr byte DEFAULT_PAD          = 0xD9;
   #define I2S_SCK  48 //48 //orig 48
 #endif
 
-#define RF_TX_PIN         18 
-#define RF_RX_PIN         17  
+#if defined(DOIT_LITE)
+  #if defined(BOTONERA_NEW)
+    #define ENC_A      34
+    #define ENC_B      33
+    #define ENC_BUTTON 12
+  #elif defined(BOTONERA_OLD)
+    #define ENC_A      26
+    #define ENC_B      34
+    #define ENC_BUTTON 12
+  #endif
+#endif
+
+#if defined(DOIT_LITE)
+  // Cableado Lite: RX del modulo RF a GPIO17, TX del modulo RF a GPIO18.
+  #define RF_TX_PIN       17
+  #define RF_RX_PIN       18
+#else
+  #define RF_TX_PIN       18
+  #define RF_RX_PIN       17
+#endif
 #define RF_CONFIG_PIN     46 //botonera marc pin 45
-#define FAST_RF
+#ifndef FAST_RF
+  #define FAST_RF
+#endif
 #if defined (FAST_RF)
   #define RF_BAUD_RATE      115200
 #else

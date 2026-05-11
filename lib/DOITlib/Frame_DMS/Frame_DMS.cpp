@@ -1,10 +1,13 @@
 #include <defines_DMS/defines_DMS.h>
 #include <Frame_DMS/Frame_DMS.h>
-#include <Element_DMS/Element_DMS.h>
-#include <icons_64x64_DMS/icons_64x64_DMS.h>
 #include <vector>
 #include <Arduino.h>
-#include <WiFi.h>
+
+#ifndef DOIT_LITE
+  #include <Element_DMS/Element_DMS.h>
+  #include <icons_64x64_DMS/icons_64x64_DMS.h>
+  #include <WiFi.h>
+#endif
 
 std::vector<uint8_t> printTargetID;
 extern LAST_ENTRY_FRAME_T  LEF;
@@ -493,11 +496,100 @@ LAST_ENTRY_FRAME_T extract_info_from_frameIn(const std::vector<uint8_t> &frame) 
 
 extern SemaphoreHandle_t uartTxMutex;
 
+#ifdef DOIT_LITE
+namespace {
+const char *liteFunctionName(byte function) {
+  switch (function) {
+  case F_REQ_ELEM_SECTOR:
+    return "F_REQ_ELEM_SECTOR";
+  case F_SET_ELEM_ID:
+    return "F_SET_ELEM_ID";
+  case F_SET_ELEM_MODE:
+    return "F_SET_ELEM_MODE";
+  case F_SET_ELEM_DEAF:
+    return "F_SET_ELEM_DEAF";
+  case F_SEND_COLOR:
+    return "F_SEND_COLOR";
+  case F_SEND_RGB:
+    return "F_SEND_RGB";
+  case F_SEND_BRIGHTNESS:
+    return "F_SEND_BRIGHTNESS";
+  case F_SEND_SENSOR_VALUE_1:
+    return "F_SEND_SENSOR_VALUE_1";
+  case F_SEND_SENSOR_VALUE_2:
+    return "F_SEND_SENSOR_VALUE_2";
+  case F_SEND_FILE_NUM:
+    return "F_SEND_FILE_NUM";
+  case F_SEND_PATTERN_NUM:
+    return "F_SEND_PATTERN_NUM";
+  case F_SEND_FLAG_BYTE:
+    return "F_SEND_FLAG_BYTE";
+  case F_SEND_COMMAND:
+    return "F_SEND_COMMAND";
+  case F_RETURN_ELEM_SECTOR:
+    return "F_RETURN_ELEM_SECTOR";
+  case F_RETURN_ELEM_ERROR:
+    return "F_RETURN_ELEM_ERROR";
+  default:
+    return "UNKNOWN";
+  }
+}
+
+void litePrintFrameByte(byte value) {
+  Serial.printf("%02X ", value);
+}
+
+void litePrintFrameTx(const FRAME_T &f) {
+  const uint16_t dataLength =
+      (static_cast<uint16_t>(f.dataLengthMsb) << 8) | f.dataLengthLsb;
+
+  Serial.printf("[RF TX] fn=%s(0x%02X) room=0x%02X targetType=0x%02X "
+                "targetNS=%02X%02X%02X%02X%02X dataLen=%u data=",
+                liteFunctionName(f.function), f.function, f.room, f.targetType,
+                f.targetNS.mac01, f.targetNS.mac02, f.targetNS.mac03,
+                f.targetNS.mac04, f.targetNS.mac05, dataLength);
+  for (byte b : f.data) {
+    litePrintFrameByte(b);
+  }
+  Serial.print("hex=");
+  litePrintFrameByte(f.start);
+  litePrintFrameByte(f.frameLengthMsb);
+  litePrintFrameByte(f.frameLengthLsb);
+  litePrintFrameByte(f.room);
+  litePrintFrameByte(f.origin);
+  litePrintFrameByte(f.originNS.mac01);
+  litePrintFrameByte(f.originNS.mac02);
+  litePrintFrameByte(f.originNS.mac03);
+  litePrintFrameByte(f.originNS.mac04);
+  litePrintFrameByte(f.originNS.mac05);
+  litePrintFrameByte(f.targetType);
+  litePrintFrameByte(f.targetNS.mac01);
+  litePrintFrameByte(f.targetNS.mac02);
+  litePrintFrameByte(f.targetNS.mac03);
+  litePrintFrameByte(f.targetNS.mac04);
+  litePrintFrameByte(f.targetNS.mac05);
+  litePrintFrameByte(f.function);
+  litePrintFrameByte(f.dataLengthMsb);
+  litePrintFrameByte(f.dataLengthLsb);
+  for (byte b : f.data) {
+    litePrintFrameByte(b);
+  }
+  litePrintFrameByte(f.checksum);
+  litePrintFrameByte(f.end);
+  Serial.println();
+}
+} // namespace
+#endif
+
 void send_frame(const FRAME_T &f) {
   int  i      = 0;
   byte dTime  = 0;
   
   if (uartTxMutex) { xSemaphoreTake(uartTxMutex, portMAX_DELAY); }
+
+  #ifdef DOIT_LITE
+    litePrintFrameTx(f);
+  #endif
 
 
   #ifdef DEBUG
@@ -629,6 +721,7 @@ void send_frame(const FRAME_T &f) {
 
   // END
   Serial1.write(f.end); // delay(dTime);
+  Serial1.flush();
   #ifdef DEBUG
     DEBUG__________ln(String(COLOR_BRIGHT_GREEN) + "[" + String(++i) + "] End = " + String(f.end, HEX) + COLOR_RESET);
     DEBUG__________ln(String(COLOR_BRIGHT_WHITE) + "======================================" + COLOR_RESET);
