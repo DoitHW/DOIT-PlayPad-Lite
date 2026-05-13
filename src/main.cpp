@@ -41,6 +41,7 @@ bool buttonLastReading = false;
 uint32_t buttonLastChangeMs = 0;
 bool adxlInt1LastState = false;
 bool relayState = false;
+bool sideReleaseConsumedByRelayLong = false;
 
 void initDebugSerial() {
   Serial.begin(kSerialBaud);
@@ -73,17 +74,31 @@ const CRGB kButtonPalette[NUM_LEDS] = {
     colorFromHex(0x0000FF), // azul
 };
 
+#if defined(DEVKIT)
 constexpr uint8_t kDirectButtonPins[NUM_LEDS] = {
-    1,  // relay
-    2,  // blanco
-    42, // rojo
-    41, // celeste
-    40, // amarillo
-    39, // naranja
-    38, // verde
-    36, // morado
-    37, // azul
+    8,  // relay
+    46, // blanco
+    3,  // rojo
+    9,  // celeste
+    12, // amarillo
+    10, // naranja
+    13, // verde
+    11, // morado
+    14, // azul
 };
+#else
+constexpr uint8_t kDirectButtonPins[NUM_LEDS] = {
+    14, // relay
+    1,  // blanco
+    34, // rojo
+    2,  // celeste
+    5,  // amarillo
+    3,  // naranja
+    6,  // verde
+    4,  // morado
+    7,  // azul
+};
+#endif
 
 const char *const kDirectButtonNames[NUM_LEDS] = {
     "RELAY", "BLANCO", "ROJO", "CELESTE", "AMARILLO",
@@ -93,6 +108,18 @@ const char *const kDirectButtonNames[NUM_LEDS] = {
 constexpr uint8_t kDirectButtonColorCodes[NUM_LEDS] = {
     RELAY, WHITE, RED, LIGHT_BLUE, YELLOW, ORANGE, GREEN, VIOLET, BLUE,
 };
+
+bool sideButtonIsPressed() {
+  return digitalRead(ENC_BUTTON) == LOW;
+}
+
+bool relayButtonIsPressed() {
+  return digitalRead(kDirectButtonPins[0]) == LOW;
+}
+
+bool adxlInt1SharesRelayPin() {
+  return INT1_ADXL_PIN == kDirectButtonPins[0];
+}
 
 void markActivity() {
   lastActivityMs = millis();
@@ -237,6 +264,10 @@ void sendButtonFrame(uint8_t buttonIndex) {
   const TARGETNS targetNS = communicator.activeTargetNS();
 
   if (buttonIndex == 0) {
+    if (sideButtonIsPressed()) {
+      Serial.println("[INPUT] RELAY press ignored while SIDE is held");
+      return;
+    }
     relayState = !relayState;
     Serial.printf("[INPUT] RELAY send F_SEND_FLAG_BYTE value=0x%02X\n",
                   relayState ? 0x01 : 0x00);
@@ -254,6 +285,50 @@ void sendButtonFrame(uint8_t buttonIndex) {
                                    color));
 }
 
+void handleRelayButtonHold(bool rawPressed, uint32_t now) {
+  static bool stablePressed = false;
+  static bool longPressSent = false;
+  static uint32_t pressStartMs = 0;
+  constexpr uint32_t kRelayPassiveHoldMs = 3000;
+
+  if (rawPressed && !stablePressed) {
+    stablePressed = true;
+    longPressSent = false;
+    pressStartMs = now;
+    Serial.printf("[RELAY] hold started GPIO%u @ %lu ms\n",
+                  kDirectButtonPins[0], now);
+    return;
+  }
+
+  if (rawPressed) {
+    if (!longPressSent && now - pressStartMs >= kRelayPassiveHoldMs) {
+      longPressSent = true;
+      sideReleaseConsumedByRelayLong = sideButtonIsPressed();
+      markActivity();
+      Serial.println("[COMM] relay long press 3s: START + ambiente 9");
+      communicator.sendPassiveAmbient();
+      showDefaultButtons();
+    }
+    return;
+  }
+
+  if (!stablePressed) {
+    return;
+  }
+
+  stablePressed = false;
+  Serial.printf("[RELAY] released GPIO%u after %lu ms\n",
+                kDirectButtonPins[0], now - pressStartMs);
+
+  if (longPressSent) {
+    Serial.println("[RELAY] release consumed by long press");
+    return;
+  }
+
+  markActivity();
+  sendButtonFrame(0);
+}
+
 void initDirectButtons() {
   pinMode(ENC_BUTTON, INPUT_PULLUP);
   for (uint8_t pin : kDirectButtonPins) {
@@ -267,6 +342,13 @@ void initDirectButtons() {
                   kDirectButtonNames[i], kDirectButtonPins[i],
                   digitalRead(kDirectButtonPins[i]) == LOW ? "PRESSED"
                                                            : "released");
+  }
+  Serial.printf("[INPUT] RELAY debug GPIO%u pullup initial raw=%d active=%s\n",
+                kDirectButtonPins[0], digitalRead(kDirectButtonPins[0]),
+                relayButtonIsPressed() ? "yes" : "no");
+  if (adxlInt1SharesRelayPin()) {
+    Serial.printf("[PIN WARN] RELAY GPIO%u is shared with ADXL INT1; using pull-up/LOW wake semantics\n",
+                  kDirectButtonPins[0]);
   }
 }
 
@@ -289,9 +371,19 @@ void pollDirectButtonsForActivity() {
       Serial.printf("[INPUT RAW] BTN[%u] %-8s GPIO%u %s @ %lu ms\n", i,
                     kDirectButtonNames[i], kDirectButtonPins[i],
                     rawPressed ? "LOW/PRESS" : "HIGH/RELEASE", now);
+      if (i == 0) {
+        Serial.printf("[RELAY DEBUG] GPIO%u raw=%d sideRaw=%d @ %lu ms\n",
+                      kDirectButtonPins[0], digitalRead(kDirectButtonPins[0]),
+                      digitalRead(ENC_BUTTON), now);
+      }
     }
 
     if (now - lastRawChangeMs[i] < kDebounceMs) {
+      continue;
+    }
+
+    if (i == 0) {
+      handleRelayButtonHold(rawPressed, now);
       continue;
     }
 
@@ -337,7 +429,7 @@ void initOwnNS() {
 void initAdxl() {
 #ifdef ADXL
   adxl345Handler.init();
-  pinMode(INT1_ADXL_PIN, INPUT_PULLDOWN);
+  pinMode(INT1_ADXL_PIN, adxlInt1SharesRelayPin() ? INPUT_PULLUP : INPUT_PULLDOWN);
   if (adxl345Handler.isInitialized()) {
     adxl345Handler.enableActivityInterrupt(600, true, true, true);
     adxl345Handler.clearInterrupts();
@@ -377,13 +469,13 @@ void waitButtonRelease() {
   Serial.printf("[INPUT] SIDE GPIO%u RELEASE @ %lu ms\n", ENC_BUTTON, millis());
 }
 
-bool cycleButtonPressed() {
+bool cycleButtonReleasedForCycle() {
   static bool lastRawPressed = false;
-  static bool pressArmed = true;
+  static bool stablePressed = false;
   static uint32_t lastRawChangeMs = 0;
-  static uint32_t lastPressSentMs = 0;
+  static uint32_t lastCycleMs = 0;
   constexpr uint32_t kDebounceMs = 15;
-  constexpr uint32_t kMinRepeatGapMs = 160;
+  constexpr uint32_t kMinCycleGapMs = 160;
 
   const bool rawPressed = (digitalRead(ENC_BUTTON) == LOW);
   const uint32_t now = millis();
@@ -399,22 +491,34 @@ bool cycleButtonPressed() {
     return false;
   }
 
-  if (!rawPressed) {
-    pressArmed = true;
+  if (rawPressed) {
+    stablePressed = true;
+    buttonStablePressed = true;
+    return false;
+  }
+
+  if (!stablePressed) {
     buttonStablePressed = false;
     return false;
   }
 
-  if (pressArmed && (now - lastPressSentMs >= kMinRepeatGapMs)) {
-    pressArmed = false;
-    buttonStablePressed = true;
-    lastPressSentMs = now;
-    Serial.printf("[INPUT] SIDE GPIO%u PRESS @ %lu ms\n", ENC_BUTTON, now);
-    markActivity();
-    return true;
+  stablePressed = false;
+  buttonStablePressed = false;
+  Serial.printf("[INPUT] SIDE GPIO%u RELEASE @ %lu ms\n", ENC_BUTTON, now);
+
+  if (sideReleaseConsumedByRelayLong) {
+    sideReleaseConsumedByRelayLong = false;
+    Serial.println("[COMM] side release consumed by relay long press");
+    return false;
   }
 
-  return false;
+  if (now - lastCycleMs < kMinCycleGapMs) {
+    return false;
+  }
+
+  lastCycleMs = now;
+  markActivity();
+  return true;
 }
 
 void runScanAtBoot() {
@@ -453,9 +557,10 @@ void enterLightSleepIfIdle() {
 
 #ifdef ADXL
   adxl345Handler.clearInterrupts();
-  pinMode(INT1_ADXL_PIN, INPUT_PULLDOWN);
+  pinMode(INT1_ADXL_PIN, adxlInt1SharesRelayPin() ? INPUT_PULLUP : INPUT_PULLDOWN);
   gpio_wakeup_enable(static_cast<gpio_num_t>(INT1_ADXL_PIN),
-                     GPIO_INTR_HIGH_LEVEL);
+                     adxlInt1SharesRelayPin() ? GPIO_INTR_LOW_LEVEL
+                                              : GPIO_INTR_HIGH_LEVEL);
 #endif
 
   esp_sleep_enable_gpio_wakeup();
@@ -526,7 +631,7 @@ void loop() {
   processIncomingFrame();
   pollDirectButtonsForActivity();
 
-  if (cycleButtonPressed()) {
+  if (cycleButtonReleasedForCycle()) {
     Serial.println("[COMM] cycle requested");
     if (communicator.next()) {
       Serial.println("[COMM] cycle frame sequence sent");

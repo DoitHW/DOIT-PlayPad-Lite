@@ -1066,10 +1066,8 @@ void PulsadoresHandler::handleComunicadorRelayCycle() {
     delay(D);
     send_frame(frameMaker_SEND_FLAG_BYTE(DEFAULT_BOTONERA, BROADCAST, NS_ZERO, 0x01));
     delay(D);
-    send_frame(frameMaker_SEND_PATTERN_NUM(DEFAULT_BOTONERA, BROADCAST, NS_ZERO, 0x09));
-    delay(D);
     relayStep = -1;
-    passiveModeActive = true;
+    passiveModeActive = false;
     passiveIsMashed = false;
     ::communicatorActiveNS = NS_ZERO;
   }

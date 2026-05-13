@@ -36,16 +36,15 @@ void CommunicatorLite::sendStart(uint8_t targetType, const TARGETNS &targetNS,
   }
 }
 
-void CommunicatorLite::sendBroadcastAmbient() {
+void CommunicatorLite::sendPassiveAmbient() {
   send_frame(
       frameMaker_SEND_COMMAND(DEFAULT_BOTONERA, BROADCAST, NS_ZERO, START_CMD));
   delay(kFrameGapMs);
   send_frame(
-      frameMaker_SEND_FLAG_BYTE(DEFAULT_BOTONERA, BROADCAST, NS_ZERO, 0x01));
-  delay(kFrameGapMs);
-  send_frame(
       frameMaker_SEND_PATTERN_NUM(DEFAULT_BOTONERA, BROADCAST, NS_ZERO, 0x09));
   delay(kFrameGapMs);
+  currentIndex_ = -1;
+  cycleState_ = CycleState::PassiveAmbient;
 }
 
 uint8_t CommunicatorLite::activeTargetType() const {
@@ -75,8 +74,8 @@ bool CommunicatorLite::next() {
       return true;
 
     case CycleState::BroadcastStarted:
-      sendBroadcastAmbient();
-      cycleState_ = CycleState::PassiveAmbient;
+      sendBlackout(BROADCAST, NS_ZERO);
+      cycleState_ = CycleState::Off;
       currentIndex_ = -1;
       return true;
 
@@ -117,9 +116,9 @@ bool CommunicatorLite::next() {
         currentIndex_ < static_cast<int>(targets_.size())) {
       sendBlackout(DEFAULT_DEVICE, targets_[currentIndex_]);
     }
-    sendBroadcastAmbient();
+    sendStart(BROADCAST, NS_ZERO, false);
     currentIndex_ = -1;
-    cycleState_ = CycleState::PassiveAmbient;
+    cycleState_ = CycleState::BroadcastStarted;
     return true;
 
   case CycleState::PassiveAmbient:

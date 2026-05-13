@@ -178,18 +178,32 @@ constexpr byte DEFAULT_PAD          = 0xD9;
   #if defined(BOTONERA_NEW)
     #define ENC_A      34
     #define ENC_B      33
-    #define ENC_BUTTON 12
+    #if defined(DEVKIT)
+      #define ENC_BUTTON 7
+    #else
+      #define ENC_BUTTON 33
+    #endif
   #elif defined(BOTONERA_OLD)
     #define ENC_A      26
     #define ENC_B      34
-    #define ENC_BUTTON 12
+    #if defined(DEVKIT)
+      #define ENC_BUTTON 7
+    #else
+      #define ENC_BUTTON 33
+    #endif
   #endif
 #endif
 
 #if defined(DOIT_LITE)
-  // Cableado Lite: RX del modulo RF a GPIO17, TX del modulo RF a GPIO18.
-  #define RF_TX_PIN       17
-  #define RF_RX_PIN       18
+  #if defined(DEVKIT)
+    // Cableado Lite devkit actual.
+    #define RF_TX_PIN       17
+    #define RF_RX_PIN       18
+  #else
+    // PCB personalizada: TX del ESP32 hacia RX del modulo, RX desde TX del modulo.
+    #define RF_TX_PIN       18
+    #define RF_RX_PIN       17
+  #endif
 #else
   #define RF_TX_PIN       18
   #define RF_RX_PIN       17
@@ -520,7 +534,11 @@ enum TOKEN_CONFIG_{
 #define LEDSTRIP_LED_DATA_PIN       46 // 21= oficial 0 45 per tires super long
 
 // DEFINES BOTONERA
-#define BOTONERA_DATA_PIN           21
+#if defined(DEVKIT)
+  #define BOTONERA_DATA_PIN         35
+#else
+  #define BOTONERA_DATA_PIN         21
+#endif
 
 //DEFINES ESCALERA
 #define VUMETER_SEL_MODE_PIN_01   1
@@ -532,7 +550,11 @@ enum TOKEN_CONFIG_{
 
 
 #define VUMETER_LED_DATA_PIN        21
-#define BOTONERA_DATA_PIN           21
+#if defined(DEVKIT)
+  #define BOTONERA_DATA_PIN         35
+#else
+  #define BOTONERA_DATA_PIN         21
+#endif
 
 //DEFINES ESCALERA
 #define VUMETER_SEL_MODE_PIN_01   1

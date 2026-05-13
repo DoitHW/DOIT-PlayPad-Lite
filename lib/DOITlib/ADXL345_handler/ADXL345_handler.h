@@ -6,10 +6,17 @@
 
 // Definición de pines I2C
 #if defined(DOIT_LITE)
-  #define SDA_ADXL_PIN 8
-  #define SCL_ADXL_PIN 9
-  #define INT1_ADXL_PIN 10
-  #define INT2_ADXL_PIN 11
+  #if defined(DEVKIT)
+    #define SDA_ADXL_PIN 42
+    #define SCL_ADXL_PIN 2
+    #define INT1_ADXL_PIN 39
+    #define INT2_ADXL_PIN 40
+  #else
+    #define SDA_ADXL_PIN 47
+    #define SCL_ADXL_PIN 48
+    #define INT1_ADXL_PIN 14
+    #define INT2_ADXL_PIN 15
+  #endif
 #else
   #define SDA_ADXL_PIN 47
   #define SCL_ADXL_PIN 48

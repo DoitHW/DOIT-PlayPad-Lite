@@ -722,6 +722,12 @@ void send_frame(const FRAME_T &f) {
   // END
   Serial1.write(f.end); // delay(dTime);
   Serial1.flush();
+  #ifdef DOIT_LITE
+    Serial.printf("[RF TX DONE] UART flushed fn=%s(0x%02X) bytes=%u baud=%lu\n",
+                  liteFunctionName(f.function), f.function,
+                  static_cast<unsigned>(21 + f.data.size()),
+                  static_cast<unsigned long>(RF_BAUD_RATE));
+  #endif
   #ifdef DEBUG
     DEBUG__________ln(String(COLOR_BRIGHT_GREEN) + "[" + String(++i) + "] End = " + String(f.end, HEX) + COLOR_RESET);
     DEBUG__________ln(String(COLOR_BRIGHT_WHITE) + "======================================" + COLOR_RESET);

@@ -114,6 +114,11 @@ void ADXL345Handler::end()
 }
 
 void ADXL345Handler::readInclinations(bool isBinary, TARGETNS ns) {
+#ifdef DOIT_LITE
+    (void)isBinary;
+    (void)ns;
+    return;
+#else
     if (!initialized || !adxl) return;
 
     // 1) Control de tiempo (50ms)
@@ -230,6 +235,8 @@ void ADXL345Handler::readInclinations(bool isBinary, TARGETNS ns) {
         }
     }
 }
+#endif
+}
 
 SENSOR_DOUBLE_T ADXL345Handler::createSensorDoubleValue(long finalValueX, long finalValueY) {
     SENSOR_DOUBLE_T s;
@@ -247,6 +254,11 @@ SENSOR_DOUBLE_T ADXL345Handler::createSensorDoubleValue(long finalValueX, long f
 }
 
 void ADXL345Handler::sendSensorValueDouble(const SENSOR_DOUBLE_T &sensorValue, TARGETNS ns) {
+#ifdef DOIT_LITE
+    (void)sensorValue;
+    (void)ns;
+    return;
+#else
 
     // Verificar que el número de serie no sea nulo (ej. {0,0,0,0,0})
     bool isValid = false;
@@ -270,6 +282,7 @@ void ADXL345Handler::sendSensorValueDouble(const SENSOR_DOUBLE_T &sensorValue, T
         ns,                // número de serie del elemento
         sensorValue
     ));
+#endif
 }
 
 // ====== Configuración de INT de ACTIVIDAD para wake (INT1) ======
