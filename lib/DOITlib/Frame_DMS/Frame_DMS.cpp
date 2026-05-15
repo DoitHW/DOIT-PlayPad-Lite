@@ -3,12 +3,6 @@
 #include <vector>
 #include <Arduino.h>
 
-#ifndef DOIT_LITE
-  #include <Element_DMS/Element_DMS.h>
-  #include <icons_64x64_DMS/icons_64x64_DMS.h>
-  #include <WiFi.h>
-#endif
-
 std::vector<uint8_t> printTargetID;
 extern LAST_ENTRY_FRAME_T  LEF;
 
