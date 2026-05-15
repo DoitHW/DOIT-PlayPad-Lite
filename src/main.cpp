@@ -109,6 +109,56 @@ constexpr uint8_t kDirectButtonColorCodes[NUM_LEDS] = {
     RELAY, WHITE, RED, LIGHT_BLUE, YELLOW, ORANGE, GREEN, VIOLET, BLUE,
 };
 
+enum class BatteryState : uint8_t {
+  Normal,
+  Low,
+  Critical,
+  Shutdown,
+};
+
+struct BatteryCurvePoint {
+  float volts;
+  float percent;
+};
+
+struct BatteryReading {
+  uint16_t raw = 0;
+  float pinVoltage = 0.0f;
+  float batteryVoltage = 0.0f;
+  float percent = 100.0f;
+};
+
+constexpr uint8_t kBatteryAdcPin = 1;
+constexpr float kBatteryR1Ohms = 47000.0f;
+constexpr float kBatteryR2Ohms = 100000.0f;
+constexpr float kBatteryDividerRatio =
+    (kBatteryR1Ohms + kBatteryR2Ohms) / kBatteryR2Ohms;
+constexpr float kBatteryCalibration = 1.0077f;
+constexpr uint8_t kBatterySampleCount = 16;
+constexpr uint32_t kBatterySampleIntervalMs = 1000;
+constexpr uint32_t kBatteryLogIntervalMs = 5000;
+constexpr float kBatteryEmaAlpha = 0.22f;
+constexpr float kBatteryLowEnterPct = 30.0f;
+constexpr float kBatteryLowExitPct = 32.0f;
+constexpr float kBatteryCriticalEnterPct = 15.0f;
+constexpr float kBatteryCriticalExitPct = 17.0f;
+constexpr float kBatteryShutdownEnterPct = 5.0f;
+constexpr float kBatteryShutdownExitPct = 7.0f;
+
+constexpr BatteryCurvePoint kBatteryCurve[] = {
+    {3.00f, 0.0f},  {3.30f, 5.0f},   {3.55f, 10.0f},
+    {3.65f, 20.0f}, {3.70f, 30.0f},  {3.75f, 40.0f},
+    {3.79f, 50.0f}, {3.85f, 60.0f},  {3.92f, 70.0f},
+    {4.00f, 80.0f}, {4.10f, 90.0f},  {4.20f, 100.0f},
+};
+
+BatteryReading batteryReading;
+BatteryState batteryState = BatteryState::Normal;
+bool batteryReadingValid = false;
+bool batteryLedRefreshRequested = false;
+uint32_t lastBatterySampleMs = 0;
+uint32_t lastBatteryLogMs = 0;
+
 bool sideButtonIsPressed() {
   return digitalRead(ENC_BUTTON) == LOW;
 }
@@ -126,9 +176,245 @@ void markActivity() {
   lastDisplayInteraction = lastActivityMs;
 }
 
+const char *batteryStateName(BatteryState state) {
+  switch (state) {
+  case BatteryState::Normal:
+    return "NORMAL";
+  case BatteryState::Low:
+    return "LOW";
+  case BatteryState::Critical:
+    return "CRITICAL";
+  case BatteryState::Shutdown:
+    return "SHUTDOWN";
+  }
+
+  return "UNKNOWN";
+}
+
+float clampFloat(float value, float minValue, float maxValue) {
+  if (value < minValue) {
+    return minValue;
+  }
+  if (value > maxValue) {
+    return maxValue;
+  }
+  return value;
+}
+
+float batteryPercentFromVoltage(float volts) {
+  constexpr size_t pointCount = sizeof(kBatteryCurve) / sizeof(kBatteryCurve[0]);
+
+  if (volts <= kBatteryCurve[0].volts) {
+    return kBatteryCurve[0].percent;
+  }
+  if (volts >= kBatteryCurve[pointCount - 1].volts) {
+    return kBatteryCurve[pointCount - 1].percent;
+  }
+
+  for (size_t i = 1; i < pointCount; ++i) {
+    const BatteryCurvePoint &high = kBatteryCurve[i];
+    if (volts <= high.volts) {
+      const BatteryCurvePoint &low = kBatteryCurve[i - 1];
+      const float span = high.volts - low.volts;
+      const float ratio = span > 0.0f ? (volts - low.volts) / span : 0.0f;
+      return low.percent + ((high.percent - low.percent) * ratio);
+    }
+  }
+
+  return 0.0f;
+}
+
+BatteryState classifyBatteryState(float percent) {
+  switch (batteryState) {
+  case BatteryState::Normal:
+    if (percent < kBatteryShutdownEnterPct) {
+      return BatteryState::Shutdown;
+    }
+    if (percent < kBatteryCriticalEnterPct) {
+      return BatteryState::Critical;
+    }
+    if (percent < kBatteryLowEnterPct) {
+      return BatteryState::Low;
+    }
+    return BatteryState::Normal;
+
+  case BatteryState::Low:
+    if (percent < kBatteryShutdownEnterPct) {
+      return BatteryState::Shutdown;
+    }
+    if (percent < kBatteryCriticalEnterPct) {
+      return BatteryState::Critical;
+    }
+    if (percent >= kBatteryLowExitPct) {
+      return BatteryState::Normal;
+    }
+    return BatteryState::Low;
+
+  case BatteryState::Critical:
+    if (percent < kBatteryShutdownEnterPct) {
+      return BatteryState::Shutdown;
+    }
+    if (percent >= kBatteryLowExitPct) {
+      return BatteryState::Normal;
+    }
+    if (percent >= kBatteryCriticalExitPct) {
+      return BatteryState::Low;
+    }
+    return BatteryState::Critical;
+
+  case BatteryState::Shutdown:
+    if (percent >= kBatteryLowExitPct) {
+      return BatteryState::Normal;
+    }
+    if (percent >= kBatteryCriticalExitPct) {
+      return BatteryState::Low;
+    }
+    if (percent >= kBatteryShutdownExitPct) {
+      return BatteryState::Critical;
+    }
+    return BatteryState::Shutdown;
+  }
+
+  return BatteryState::Normal;
+}
+
+BatteryReading readBatteryAdc() {
+  (void)analogRead(kBatteryAdcPin);
+  delayMicroseconds(300);
+
+  uint32_t rawSum = 0;
+  uint32_t milliVoltSum = 0;
+  for (uint8_t i = 0; i < kBatterySampleCount; ++i) {
+    rawSum += analogRead(kBatteryAdcPin);
+    milliVoltSum += analogReadMilliVolts(kBatteryAdcPin);
+    delayMicroseconds(250);
+  }
+
+  BatteryReading sample;
+  sample.raw = static_cast<uint16_t>(rawSum / kBatterySampleCount);
+  sample.pinVoltage =
+      static_cast<float>(milliVoltSum) / static_cast<float>(kBatterySampleCount) /
+      1000.0f;
+  if (sample.pinVoltage <= 0.0f && sample.raw > 0) {
+    sample.pinVoltage = (static_cast<float>(sample.raw) / 4095.0f) * 3.3f;
+  }
+  sample.batteryVoltage =
+      sample.pinVoltage * kBatteryDividerRatio * kBatteryCalibration;
+  sample.percent =
+      clampFloat(batteryPercentFromVoltage(sample.batteryVoltage), 0.0f, 100.0f);
+  return sample;
+}
+
+void logBatteryStatus(const char *reason) {
+  Serial.printf("[BAT] reason=%s state=%s pct=%.1f pin=%.3fV vbat=%.3fV raw=%u\n",
+                reason, batteryStateName(batteryState), batteryReading.percent,
+                batteryReading.pinVoltage, batteryReading.batteryVoltage,
+                batteryReading.raw);
+}
+
+bool batteryInputsLocked() {
+  return batteryReadingValid && batteryState == BatteryState::Shutdown;
+}
+
+void logBatteryInputBlocked(const char *source) {
+  static uint32_t lastBlockedLogMs = 0;
+  const uint32_t now = millis();
+  if (lastBlockedLogMs != 0 && now - lastBlockedLogMs < 1000) {
+    return;
+  }
+
+  lastBlockedLogMs = now;
+  Serial.printf("[BAT] input blocked source=%s state=%s pct=%.1f\n", source,
+                batteryStateName(batteryState), batteryReading.percent);
+}
+
+void updateBatteryMonitor(bool force = false) {
+  const uint32_t now = millis();
+  if (!force && batteryReadingValid &&
+      now - lastBatterySampleMs < kBatterySampleIntervalMs) {
+    return;
+  }
+
+  lastBatterySampleMs = now;
+  const BatteryReading sample = readBatteryAdc();
+  if (!batteryReadingValid) {
+    batteryReading = sample;
+    batteryReadingValid = true;
+  } else {
+    batteryReading.raw = sample.raw;
+    batteryReading.pinVoltage +=
+        (sample.pinVoltage - batteryReading.pinVoltage) * kBatteryEmaAlpha;
+    batteryReading.batteryVoltage =
+        batteryReading.pinVoltage * kBatteryDividerRatio * kBatteryCalibration;
+    batteryReading.percent = clampFloat(
+        batteryPercentFromVoltage(batteryReading.batteryVoltage), 0.0f, 100.0f);
+  }
+
+  const BatteryState previousState = batteryState;
+  batteryState = classifyBatteryState(batteryReading.percent);
+  const bool stateChanged = batteryState != previousState;
+  if (stateChanged) {
+    batteryLedRefreshRequested = true;
+  }
+
+  if (force || stateChanged || now - lastBatteryLogMs >= kBatteryLogIntervalMs) {
+    logBatteryStatus(force ? "init" : (stateChanged ? "state-change" : "periodic"));
+    lastBatteryLogMs = now;
+  }
+}
+
+void initBatteryMonitor() {
+  pinMode(kBatteryAdcPin, INPUT);
+  analogReadResolution(12);
+  analogSetPinAttenuation(kBatteryAdcPin, ADC_11db);
+  adcAttachPin(kBatteryAdcPin);
+
+  Serial.printf("[BAT] adcPin=GPIO%u r1=%.0fohm r2=%.0fohm ratio=%.3f cal=%.3f samples=%u\n",
+                kBatteryAdcPin, kBatteryR1Ohms, kBatteryR2Ohms,
+                kBatteryDividerRatio, kBatteryCalibration, kBatterySampleCount);
+  updateBatteryMonitor(true);
+}
+
 CRGB relayIdleColor() {
   const uint8_t amount = beatsin8(14, 0, 255);
   return blend(CRGB::Blue, CRGB::Cyan, amount);
+}
+
+CRGB scaledColor(CRGB color, uint8_t brightness) {
+  color.nscale8_video(brightness);
+  return color;
+}
+
+CRGB batteryLowRelayColor() {
+  const uint8_t brightness = beatsin8(7, 28, 210);
+  return scaledColor(CRGB(255, 82, 0), brightness);
+}
+
+CRGB batteryCriticalRelayColor() {
+  const uint8_t brightness = beatsin8(20, 8, 255);
+  return scaledColor(CRGB::Red, brightness);
+}
+
+void applyBatteryLedOverlay() {
+  switch (batteryState) {
+  case BatteryState::Normal:
+    return;
+  case BatteryState::Low:
+    leds[0] = batteryLowRelayColor();
+    return;
+  case BatteryState::Critical:
+    leds[0] = batteryCriticalRelayColor();
+    return;
+  case BatteryState::Shutdown:
+    fill_solid(leds, NUM_LEDS, CRGB::Black);
+    leds[0] = CRGB::Red;
+    return;
+  }
+}
+
+void showLedsBatteryAware() {
+  applyBatteryLedOverlay();
+  FastLED.show();
 }
 
 void showDefaultButtons() {
@@ -136,7 +422,16 @@ void showDefaultButtons() {
     leds[i] = kButtonPalette[i];
   }
   leds[0] = relayIdleColor();
-  FastLED.show();
+  showLedsBatteryAware();
+}
+
+void refreshBatteryLedsIfRequested() {
+  if (!batteryLedRefreshRequested) {
+    return;
+  }
+
+  batteryLedRefreshRequested = false;
+  showDefaultButtons();
 }
 
 void updateIdleLedAnimation() {
@@ -147,14 +442,16 @@ void updateIdleLedAnimation() {
   }
 
   lastRefreshMs = now;
-  leds[0] = relayIdleColor();
-  FastLED.show();
+  if (batteryState == BatteryState::Normal) {
+    leds[0] = relayIdleColor();
+  }
+  showLedsBatteryAware();
 }
 
 void flashAll(const CRGB &color, uint8_t times = 2, uint16_t holdMs = 90) {
   for (uint8_t i = 0; i < times; ++i) {
     fill_solid(leds, NUM_LEDS, color);
-    FastLED.show();
+    showLedsBatteryAware();
     delay(holdMs);
     showDefaultButtons();
     delay(holdMs);
@@ -162,22 +459,23 @@ void flashAll(const CRGB &color, uint8_t times = 2, uint16_t holdMs = 90) {
 }
 
 void welcomeEffect() {
-  FastLED.clear(true);
+  FastLED.clear();
+  showLedsBatteryAware();
   for (uint8_t i = 0; i < NUM_LEDS; ++i) {
     leds[i] = kButtonPalette[i];
-    FastLED.show();
+    showLedsBatteryAware();
     delay(55);
   }
 
   for (uint8_t pass = 0; pass < 2; ++pass) {
     for (uint8_t level = 40; level <= kLedBrightness; level += 8) {
       FastLED.setBrightness(level);
-      FastLED.show();
+      showLedsBatteryAware();
       delay(18);
     }
     for (int level = kLedBrightness; level >= 40; level -= 8) {
       FastLED.setBrightness(level);
-      FastLED.show();
+      showLedsBatteryAware();
       delay(18);
     }
   }
@@ -197,13 +495,13 @@ void showScanningFrame() {
   }
 
   scanHead = (scanHead + 1) % NUM_LEDS;
-  FastLED.show();
+  showLedsBatteryAware();
 }
 
 void pulseScanEvent(const CRGB &color, uint8_t times = 1) {
   for (uint8_t i = 0; i < times; ++i) {
     fill_solid(leds, NUM_LEDS, color);
-    FastLED.show();
+    showLedsBatteryAware();
     delay(70);
     showScanningFrame();
     delay(45);
@@ -274,6 +572,11 @@ void printTarget(const char *label, uint8_t targetType, const TARGETNS &targetNS
 }
 
 void sendButtonFrame(uint8_t buttonIndex) {
+  if (batteryInputsLocked()) {
+    logBatteryInputBlocked(kDirectButtonNames[buttonIndex]);
+    return;
+  }
+
   const uint8_t targetType = communicator.activeTargetType();
   const TARGETNS targetNS = communicator.activeTargetNS();
 
@@ -304,6 +607,18 @@ void handleRelayButtonHold(bool rawPressed, uint32_t now) {
   static bool longPressSent = false;
   static uint32_t pressStartMs = 0;
   constexpr uint32_t kRelayPassiveHoldMs = 3000;
+
+  if (batteryInputsLocked()) {
+    if (rawPressed && !stablePressed) {
+      stablePressed = true;
+      longPressSent = false;
+      pressStartMs = now;
+      logBatteryInputBlocked("RELAY");
+    } else if (!rawPressed && stablePressed) {
+      stablePressed = false;
+    }
+    return;
+  }
 
   if (rawPressed && !stablePressed) {
     stablePressed = true;
@@ -403,6 +718,14 @@ void pollDirectButtonsForActivity() {
 
     if (!rawPressed) {
       pressArmed[i] = true;
+      continue;
+    }
+
+    if (batteryInputsLocked()) {
+      if (pressArmed[i]) {
+        pressArmed[i] = false;
+        logBatteryInputBlocked(kDirectButtonNames[i]);
+      }
       continue;
     }
 
@@ -526,6 +849,12 @@ bool cycleButtonReleasedForCycle() {
     return false;
   }
 
+  if (batteryInputsLocked()) {
+    lastCycleMs = now;
+    logBatteryInputBlocked("SIDE");
+    return false;
+  }
+
   if (now - lastCycleMs < kMinCycleGapMs) {
     return false;
   }
@@ -555,6 +884,10 @@ void runScanAtBoot() {
 
 void enterLightSleepIfIdle() {
   if (millis() - lastActivityMs < kSleepAfterMs) {
+    return;
+  }
+
+  if (batteryInputsLocked()) {
     return;
   }
 
@@ -612,8 +945,10 @@ void pollAdxlDebug() {
 void setup() {
   initDebugSerial();
 
+  initBatteryMonitor();
   initDirectButtons();
-  const bool scanRequested = (digitalRead(ENC_BUTTON) == LOW);
+  const bool scanRequested =
+      !batteryInputsLocked() && (digitalRead(ENC_BUTTON) == LOW);
   Serial.printf("[BOOT] scanRequested=%s\n", scanRequested ? "yes" : "no");
 
   FastLED.addLeds<WS2812, BOTONERA_DATA_PIN, RGB>(leds, NUM_LEDS);
@@ -642,6 +977,8 @@ void setup() {
 }
 
 void loop() {
+  updateBatteryMonitor();
+  refreshBatteryLedsIfRequested();
   processIncomingFrame();
   pollDirectButtonsForActivity();
 
