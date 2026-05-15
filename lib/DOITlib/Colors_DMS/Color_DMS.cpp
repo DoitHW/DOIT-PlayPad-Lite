@@ -199,7 +199,6 @@ void COLORHANDLER_::setPatternBotonera(byte mode, DynamicLEDManager& ledManager)
                   fill_solid(leds, NUM_LEDS, CRGB::Black);
                   ledManager.clearEffects();
                   ledManager.addEffect(new FadeEffect(*this, 0, CRGB::Blue, CRGB::Cyan, 50));
-                  leds[8] = CRGB::Blue;
                   leds[0] = CRGB::Blue;
                   this->syncButtonsWithLEDs();
                   FastLED.show();
@@ -224,10 +223,6 @@ void COLORHANDLER_::setPatternBotonera(byte mode, DynamicLEDManager& ledManager)
 #endif
       return;
   }
-
-#ifdef DEBUG
-  DEBUG__________printf("Mode %d - Byte Config: 0x%02X%02X\n", mode, modeConfig[0], modeConfig[1]);
-#endif
 
   // --- FICHAS ---
   if (currentFile == "Fichas") {
@@ -264,6 +259,8 @@ void COLORHANDLER_::setPatternBotonera(byte mode, DynamicLEDManager& ledManager)
   bool isMultiRelay = relayCount > 1;
   bool isAromaterapia = (!hasRelay && hasRelayN1 && hasRelayN2);
 
+  fill_solid(leds, NUM_LEDS, CRGB::Black);
+
   // --- COLORES DE LOS BOTONES (excepto LED 0) ---
   if (getModeFlag(modeConfig, HAS_PATTERNS)) {
       fill_solid(leds + 1, NUM_LEDS - 1, CRGB::White);
@@ -282,10 +279,10 @@ void COLORHANDLER_::setPatternBotonera(byte mode, DynamicLEDManager& ledManager)
   } else {
       fill_solid(leds + 1, NUM_LEDS - 1, CRGB::Black);
   }
-  DEBUG__________ln("relayCount: " + String(relayCount));
   // --- VISUALIZACIÓN DE RELÉS ---
   if (relayCount == 1 && hasRelay) {
       // Caso: solo un relé → usar LED 0 con efecto
+      leds[0] = CRGB::Blue;
       ledManager.addEffect(new FadeEffect(*this, 0, CRGB::Blue, CRGB::Cyan, 50));
   } else if (isMultiRelay || isAromaterapia) {
       // Caso: 2 o más relés → usar LEDs 9, 7, 5, 3 en blanco

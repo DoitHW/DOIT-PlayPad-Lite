@@ -951,10 +951,11 @@ void PulsadoresHandler::applyAdvancedPalettePulse(const ButtonContext &ctx) {
 // 7. LÓGICA COMPLEJA: Ciclo Comunicador
 // ==========================================
 // Máquina de estados:
+//   Off --relay--> BroadcastNormal
 //   BroadcastNormal --relay--> ElementCycle(elem0)
 //   ElementCycle(elemK) --relay--> ElementCycle(elemK+1)    [si K < N-1]
-//   ElementCycle(elemN) --relay--> BroadcastPassive
-//   BroadcastPassive --relay--> BroadcastNormal             [si intacto]
+//   ElementCycle(elemN) --relay--> Off (BLACKOUT broadcast)
+//   BroadcastPassive --relay--> ElementCycle(elem0)
 //   BroadcastPassive --color--> BroadcastPassiveOverridden  [primer color]
 //   BroadcastPassiveOverridden --relay--> ElementCycle(elem0)
 // ==========================================
@@ -995,7 +996,7 @@ void PulsadoresHandler::handleComunicadorRelayCycle() {
     }
     if (!found) relayStep = -1;
   }
-  if (relayStep < -1 || relayStep >= (int)nsList.size()) relayStep = -1;
+  if (relayStep < -2 || relayStep >= (int)nsList.size()) relayStep = -1;
 
   // --- Helper: encender un elemento con ON flag si tiene relé ---
   auto startElement = [&](uint8_t tType, const TARGETNS &tNS) {
@@ -1018,7 +1019,21 @@ void PulsadoresHandler::handleComunicadorRelayCycle() {
   // TRANSICIONES
   // ==========================================================
 
-  if (relayStep == -1) {
+  if (relayStep == -1 && !passiveModeActive) {
+    // Estado apagado: primero se arranca todo en broadcast.
+    startElement(BROADCAST, NS_ZERO);
+    relayStep = -2;
+    ::communicatorActiveNS = NS_ZERO;
+
+  } else if (relayStep == -2) {
+    // BroadcastNormal -> primer elemento individual.
+    send_frame(frameMaker_SEND_COMMAND(DEFAULT_BOTONERA, BROADCAST, NS_ZERO, BLACKOUT));
+    delay(D);
+    startElement(DEFAULT_DEVICE, nsList[0]);
+    relayStep = 0;
+    ::communicatorActiveNS = nsList[0];
+
+  } else if (relayStep == -1) {
     // Estamos en algún estado broadcast (Normal, Pasivo o PasivoMachacado)
 
     if (!passiveModeActive) {
@@ -1060,11 +1075,8 @@ void PulsadoresHandler::handleComunicadorRelayCycle() {
     ::communicatorActiveNS = nsList[relayStep];
 
   } else {
-    // ── ESTADO 2: ElementCycle último → BroadcastPassive ──
-    // NO apagar el último elemento; enviar START broadcast + Ambiente 9
-    send_frame(frameMaker_SEND_COMMAND(DEFAULT_BOTONERA, BROADCAST, NS_ZERO, START_CMD));
-    delay(D);
-    send_frame(frameMaker_SEND_FLAG_BYTE(DEFAULT_BOTONERA, BROADCAST, NS_ZERO, 0x01));
+    // Ultimo elemento -> apagado general por broadcast.
+    send_frame(frameMaker_SEND_COMMAND(DEFAULT_BOTONERA, BROADCAST, NS_ZERO, BLACKOUT));
     delay(D);
     relayStep = -1;
     passiveModeActive = false;

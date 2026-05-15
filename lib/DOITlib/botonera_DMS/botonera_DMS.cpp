@@ -2143,9 +2143,39 @@ void BOTONERA_::escanearSala()
     // ===== Estado inicial UI =====
     formatSubMenuActive = false;
     hiddenMenuActive    = false;
-    loadElementsFromSPIFFS();
 
     // ===== Helpers =====
+    auto deleteStoredElements = []() {
+        std::vector<String> paths;
+        fs::File root = SPIFFS.open("/");
+        if (!root || !root.isDirectory()) {
+            DEBUG__________ln("No se pudo abrir SPIFFS para limpiar elementos antes del escaneo.");
+            return 0u;
+        }
+
+        for (fs::File f = root.openNextFile(); f; f = root.openNextFile()) {
+            String fileName = f.name();
+            f.close();
+            if (!fileName.startsWith("/")) {
+                fileName = "/" + fileName;
+            }
+            if (fileName.startsWith("/element_") && fileName.endsWith(".bin")) {
+                paths.push_back(fileName);
+            }
+        }
+        root.close();
+
+        unsigned removed = 0;
+        for (const String& path : paths) {
+            if (SPIFFS.remove(path)) {
+                ++removed;
+            } else {
+                DEBUG__________printf("No se pudo eliminar %s antes del escaneo.\n", path.c_str());
+            }
+        }
+        return removed;
+    };
+
     auto nsToStr = [](const TARGETNS& ns) {
         char b[16];
         snprintf(b, sizeof(b), "%02X:%02X:%02X:%02X:%02X", ns.mac01, ns.mac02, ns.mac03, ns.mac04, ns.mac05);
@@ -2162,6 +2192,14 @@ void BOTONERA_::escanearSala()
     constexpr unsigned long kSectorTimeoutMs   = 2000UL;  // t/o por sector
     constexpr int           kRetriesPerSector  = 10;      // reintentos por (NS, sector)
     constexpr unsigned long kInterReqDelayMs   = 35UL;    // pausa entre peticiones
+
+    const unsigned removedBeforeScan = deleteStoredElements();
+    loadElementsFromSPIFFS();
+    currentIndex = 0;
+    relayStep = -1;
+    communicatorActiveNS = NS_ZERO;
+    RelayStateManager::clear();
+    DEBUG__________printf("Elementos almacenados eliminados antes del escaneo: %u\n", removedBeforeScan);
 
     // ===== Activar escaneo (inbox ON en RX_main_handler) =====
     rxSectorInbox.clear();
@@ -2314,6 +2352,34 @@ void BOTONERA_::escanearSala()
 
     if (huboAltas) {
         loadElementsFromSPIFFS();
+        if ((size_t)currentIndex < elementFiles.size()) {
+            const String currentFile = elementFiles[currentIndex];
+            uint8_t currentMode = 0;
+
+            if (isSpiffsPath(currentFile)) {
+                fs::File f = SPIFFS.open(currentFile, "r");
+                if (f) {
+                    if (f.seek(OFFSET_CURRENTMODE, SeekSet)) {
+                        (void)f.read(&currentMode, 1);
+                    }
+                    f.close();
+                }
+            } else if (currentFile == "Ambientes") {
+                currentMode = ambientesOption.currentMode;
+            } else if (currentFile == "Fichas") {
+                currentMode = fichasOption.currentMode;
+            } else if (currentFile == "Apagar") {
+                currentMode = apagarSala.currentMode;
+            } else if (currentFile == "Comunicador") {
+                currentMode = comunicadorOption.currentMode;
+            } else if (currentFile == "Dado") {
+                currentMode = dadoOption.currentMode;
+            }
+
+            colorHandler.setCurrentFile(currentFile);
+            colorHandler.setPatternBotonera(currentMode, ledManager);
+            drawCurrentElement();
+        }
         DEBUG__________ln("SPIFFS recargado tras altas.");
     }
 
@@ -2536,7 +2602,7 @@ bool BOTONERA_::procesar_sector_NS(int sector,
 
         case ELEM_CMODE_SECTOR:
             if (plen < 1) return false;
-            info->currentMode = p[0];
+            info->currentMode = DEFAULT_BASIC_MODE;
             return true;
 
         case ELEM_SERIAL_SECTOR:

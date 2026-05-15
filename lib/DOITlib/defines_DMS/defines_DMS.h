@@ -438,7 +438,7 @@ constexpr byte DEFAULT_PAD          = 0xD9;
 #define ELEM_MODE_15_DESC   0x22
 
 
-#define DEFAULT_BASIC_MODE  0x01
+#define DEFAULT_BASIC_MODE  0x00
 
 #define TYPE_BOTONERA       0xAB
 #define TYPE_COLUMN         0x01

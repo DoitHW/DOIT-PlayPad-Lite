@@ -101,6 +101,35 @@ static uint8_t readActiveModeIndexForFile(const String &file) noexcept {
   return m;
 }
 
+static String nsToDebugString(const TARGETNS &ns) {
+  char b[16];
+  snprintf(b, sizeof(b), "%02X:%02X:%02X:%02X:%02X", ns.mac01, ns.mac02,
+           ns.mac03, ns.mac04, ns.mac05);
+  return String(b);
+}
+
+static void logElementFocusDebug(int index, const String &file, uint8_t mode,
+                                 const uint8_t cfg[2]) noexcept {
+#ifdef DEBUG
+  const uint16_t raw = (static_cast<uint16_t>(cfg[0]) << 8) | cfg[1];
+  const bool exists = getModeFlag(cfg, MODE_EXIST);
+  const bool basic = getModeFlag(cfg, HAS_BASIC_COLOR);
+  const bool advanced = getModeFlag(cfg, HAS_ADVANCED_COLOR);
+  const bool relay = getModeFlag(cfg, HAS_RELAY);
+  const bool relayN1 = getModeFlag(cfg, HAS_RELAY_N1);
+  const bool relayN2 = getModeFlag(cfg, HAS_RELAY_N2);
+  const bool passive = getModeFlag(cfg, HAS_PASSIVE);
+  const bool patterns = getModeFlag(cfg, HAS_PATTERNS);
+  const TARGETNS ns = getCurrentElementNS();
+
+  DEBUG__________printf(
+      "[FOCUS] idx=%d file=%s ns=%s mode=%u modeConfig=0x%04X "
+      "exist=%u basic=%u adv=%u relay=%u n1=%u n2=%u passive=%u patterns=%u\n",
+      index, file.c_str(), nsToDebugString(ns).c_str(), mode, raw, exists,
+      basic, advanced, relay, relayN1, relayN2, passive, patterns);
+#endif
+}
+
 static void applyModePatternForFile(const String &file, uint8_t mode) noexcept {
   colorHandler.setCurrentFile(file);
   colorHandler.setPatternBotonera(mode, ledManager);
@@ -474,10 +503,6 @@ void handleEncoder() noexcept {
       int realModeIndex = 0;
       byte modeConfig[2] = {0};
 
-      // Refresca el mapeo de LEDs/botones al cambiar de foco
-      colorHandler.setCurrentFile(currentFile);
-      colorHandler.setPatternBotonera(realModeIndex, ledManager);
-
       if (isSpecialFile(currentFile)) {
         INFO_PACK_T *opt = nullptr;
         if (currentFile == "Ambientes")
@@ -491,8 +516,10 @@ void handleEncoder() noexcept {
         else if (currentFile == "Dado")
           opt = &dadoOption;
 
-        realModeIndex = opt->currentMode;
-        memcpy(modeConfig, opt->mode[realModeIndex].config, 2);
+        if (opt) {
+          realModeIndex = opt->currentMode;
+          memcpy(modeConfig, opt->mode[realModeIndex].config, 2);
+        }
       } else {
         fs::File f = SPIFFS.open(currentFile, "r");
         if (f) {
@@ -507,12 +534,12 @@ void handleEncoder() noexcept {
       // Flags de sensores
       adxl = getModeFlag(modeConfig, HAS_SENS_VAL_1);
       useMic = getModeFlag(modeConfig, HAS_SENS_VAL_2);
+      logElementFocusDebug(currentIndex, currentFile, (uint8_t)realModeIndex,
+                           modeConfig);
 
-      if (isSpecialFile(currentFile)) {
-        // Para RAM: Ambientes, Fichas, Comunicador, Apagar, Dado
-        colorHandler.setCurrentFile(currentFile);
-        colorHandler.setPatternBotonera(realModeIndex, ledManager);
-      }
+      // Refresca LEDs/botones con el modeConfig del modo real, no con modo 0.
+      colorHandler.setCurrentFile(currentFile);
+      colorHandler.setPatternBotonera(realModeIndex, ledManager);
 
       // Redibujo del elemento actual
       drawCurrentElement();

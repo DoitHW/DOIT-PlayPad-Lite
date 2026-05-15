@@ -31,6 +31,10 @@ static inline std::array<uint8_t,5> toKey(const TARGETNS& ns) {
 static std::unordered_map<std::array<uint8_t,5>, bool, Array5Hash, Array5Eq> relayStateByNS;
 static std::unordered_map<std::array<uint8_t,5>, bool, Array5Hash, Array5Eq> relayCapByNS;
 
+static bool modeHasRelay(const uint8_t cfg[2]) {
+    return getModeFlag(cfg, HAS_RELAY);
+}
+
 void RelayStateManager::set(const TARGETNS& ns, bool on) {
     relayStateByNS[toKey(ns)] = on;
 }
@@ -114,7 +118,47 @@ static bool readNSFromFileOrRAM(const String& file, TARGETNS &out) {
 
 bool RelayStateManager::hasRelay(const TARGETNS& ns) {
     auto it = relayCapByNS.find(toKey(ns));
-    return (it != relayCapByNS.end()) && it->second;
+    if (it != relayCapByNS.end()) {
+        return it->second;
+    }
+
+    bool anyRelay = false;
+
+    const INFO_PACK_T* statics[] = { &ambientesOption, &fichasOption, &comunicadorOption, &apagarSala, &dadoOption };
+    for (const INFO_PACK_T* opt : statics) {
+        if (std::memcmp(opt->serialNum, &ns, 5) != 0) continue;
+
+        for (int m = 0; m < 16; ++m) {
+            if (modeHasRelay(opt->mode[m].config)) {
+                anyRelay = true;
+                break;
+            }
+        }
+        relayCapByNS[toKey(ns)] = anyRelay;
+        return anyRelay;
+    }
+
+    for (const String& f : elementFiles) {
+        if (f == "Ambientes" || f == "Fichas" || f == "Comunicador" || f == "Apagar" || f == "Dado") continue;
+
+        TARGETNS fileNS{};
+        if (!readNSFromFileOrRAM(f, fileNS)) continue;
+        if (std::memcmp(&fileNS, &ns, 5) != 0) continue;
+
+        String path = f.startsWith("/") ? f : "/" + f;
+        for (int m = 0; m < 16; ++m) {
+            uint8_t cfg[2] = {0};
+            if (getModeConfig(path, (byte)m, cfg) && modeHasRelay(cfg)) {
+                anyRelay = true;
+                break;
+            }
+        }
+        relayCapByNS[toKey(ns)] = anyRelay;
+        return anyRelay;
+    }
+
+    relayCapByNS[toKey(ns)] = false;
+    return false;
 }
 
 bool RelayStateManager::getModeConfigForNS(const TARGETNS& ns, uint8_t modeCfg[2])
@@ -142,9 +186,7 @@ bool RelayStateManager::getModeConfigForNS(const TARGETNS& ns, uint8_t modeCfg[2
         fs::File file = SPIFFS.open(path, "r");
         if (!file) continue;
 
-        uint8_t curMode = 0;
-        file.seek(OFFSET_CURRENTMODE, SeekSet);
-        file.read(&curMode, 1);
+        uint8_t curMode = DEFAULT_BASIC_MODE;
 
         file.seek(OFFSET_MODES + curMode * SIZE_MODE + 216, SeekSet);
         file.read(modeCfg, 2);

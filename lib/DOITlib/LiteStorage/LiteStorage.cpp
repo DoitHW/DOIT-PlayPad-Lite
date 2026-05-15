@@ -12,6 +12,10 @@ bool isElementFile(const String &path) {
          path.indexOf("_icon") < 0;
 }
 
+bool isStoredElementFile(const String &path) {
+  return path.startsWith("/element_") && path.endsWith(".bin");
+}
+
 bool nsEquals(const TARGETNS &a, const TARGETNS &b) {
   return a.mac01 == b.mac01 && a.mac02 == b.mac02 && a.mac03 == b.mac03 &&
          a.mac04 == b.mac04 && a.mac05 == b.mac05;
@@ -106,6 +110,35 @@ std::vector<TARGETNS> loadTargets() {
   targets.erase(std::unique(targets.begin(), targets.end(), nsEquals),
                 targets.end());
   return targets;
+}
+
+size_t clearTargets() {
+  std::vector<String> paths;
+
+  File root = SPIFFS.open("/");
+  if (!root || !root.isDirectory()) {
+    return 0;
+  }
+
+  for (File file = root.openNextFile(); file; file = root.openNextFile()) {
+    String path = file.name();
+    file.close();
+    if (!path.startsWith("/")) {
+      path = "/" + path;
+    }
+    if (isStoredElementFile(path)) {
+      paths.push_back(path);
+    }
+  }
+  root.close();
+
+  size_t removed = 0;
+  for (const String &path : paths) {
+    if (SPIFFS.remove(path)) {
+      removed++;
+    }
+  }
+  return removed;
 }
 
 bool targetExists(const TARGETNS &ns) {

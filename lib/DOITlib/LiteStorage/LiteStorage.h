@@ -21,6 +21,7 @@ constexpr size_t kMinimumElementFileSize = kOffsetCurrentMode + kCurrentModeLen;
 
 bool begin();
 std::vector<TARGETNS> loadTargets();
+size_t clearTargets();
 bool targetExists(const TARGETNS &ns);
 bool saveMinimalTarget(const TARGETNS &ns);
 String targetToHex(const TARGETNS &ns);

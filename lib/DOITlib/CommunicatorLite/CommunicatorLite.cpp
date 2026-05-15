@@ -92,11 +92,12 @@ bool CommunicatorLite::next() {
   switch (cycleState_) {
   case CycleState::Off:
     sendStart(BROADCAST, NS_ZERO, false);
-    currentIndex_ = -1;
     cycleState_ = CycleState::BroadcastStarted;
+    currentIndex_ = -1;
     return true;
 
   case CycleState::BroadcastStarted:
+  case CycleState::PassiveAmbient:
     sendBlackout(BROADCAST, NS_ZERO);
     currentIndex_ = 0;
     sendStart(DEFAULT_DEVICE, targets_[currentIndex_], false);
@@ -105,26 +106,19 @@ bool CommunicatorLite::next() {
 
   case CycleState::TargetStarted:
     if (currentIndex_ >= 0 &&
-        currentIndex_ < static_cast<int>(targets_.size()) - 1) {
-      sendBlackout(DEFAULT_DEVICE, targets_[currentIndex_]);
-      currentIndex_++;
-      sendStart(DEFAULT_DEVICE, targets_[currentIndex_], false);
-      return true;
-    }
-
-    if (currentIndex_ >= 0 &&
         currentIndex_ < static_cast<int>(targets_.size())) {
       sendBlackout(DEFAULT_DEVICE, targets_[currentIndex_]);
     }
-    sendStart(BROADCAST, NS_ZERO, false);
-    currentIndex_ = -1;
-    cycleState_ = CycleState::BroadcastStarted;
-    return true;
 
-  case CycleState::PassiveAmbient:
-    sendBlackout(BROADCAST, NS_ZERO);
-    currentIndex_ = -1;
-    cycleState_ = CycleState::Off;
+    currentIndex_++;
+    if (currentIndex_ >= static_cast<int>(targets_.size())) {
+      sendBlackout(BROADCAST, NS_ZERO);
+      cycleState_ = CycleState::Off;
+      currentIndex_ = -1;
+      return true;
+    }
+    sendStart(DEFAULT_DEVICE, targets_[currentIndex_], false);
+    cycleState_ = CycleState::TargetStarted;
     return true;
   }
 

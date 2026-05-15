@@ -53,6 +53,7 @@ LiteScanResult RoomScannerLite::scan(LiteScanFeedback feedback) {
   std::vector<TARGETNS> discovered;
 
   notify(feedback, LiteScanEvent::Started, nullptr);
+  LiteStorage::clearTargets();
 
   frameReceived = false;
   uartBuffer.clear();

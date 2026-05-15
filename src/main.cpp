@@ -186,41 +186,55 @@ void welcomeEffect() {
   showDefaultButtons();
 }
 
-void scanningTick() {
-  static uint8_t hue = 140;
-  for (uint8_t i = 0; i < NUM_LEDS; ++i) {
-    leds[i] = CHSV(hue + (i * 8), 180, 120);
+void showScanningFrame() {
+  static uint8_t scanHead = 0;
+  fill_solid(leds, NUM_LEDS, CRGB(0, 0, 18));
+
+  for (uint8_t tail = 0; tail < 4; ++tail) {
+    const uint8_t ledIndex = (scanHead + NUM_LEDS - tail) % NUM_LEDS;
+    const uint8_t brightness = 180 - (tail * 38);
+    leds[ledIndex] = CHSV(145, 220, brightness);
   }
-  hue += 3;
+
+  scanHead = (scanHead + 1) % NUM_LEDS;
   FastLED.show();
+}
+
+void pulseScanEvent(const CRGB &color, uint8_t times = 1) {
+  for (uint8_t i = 0; i < times; ++i) {
+    fill_solid(leds, NUM_LEDS, color);
+    FastLED.show();
+    delay(70);
+    showScanningFrame();
+    delay(45);
+  }
 }
 
 void scanFeedback(LiteScanEvent event, const TARGETNS *) {
   switch (event) {
   case LiteScanEvent::Started:
     Serial.println("[SCAN] started");
-    fill_solid(leds, NUM_LEDS, CRGB::Blue);
-    FastLED.show();
+    showScanningFrame();
     break;
   case LiteScanEvent::Tick:
     Serial.println("[SCAN] tick");
-    scanningTick();
+    showScanningFrame();
     break;
   case LiteScanEvent::Discovered:
     Serial.println("[SCAN] target discovered");
-    scanningTick();
+    pulseScanEvent(CRGB::White, 1);
     break;
   case LiteScanEvent::Saved:
     Serial.println("[SCAN] target saved");
-    flashAll(CRGB::Green, 1);
+    pulseScanEvent(CRGB::Green, 2);
     break;
   case LiteScanEvent::Duplicate:
     Serial.println("[SCAN] target duplicate");
-    flashAll(CRGB::Yellow, 1);
+    pulseScanEvent(CRGB::Yellow, 1);
     break;
   case LiteScanEvent::SaveFailed:
     Serial.println("[SCAN] target save failed");
-    flashAll(CRGB::Red, 2);
+    pulseScanEvent(CRGB::Red, 2);
     break;
   case LiteScanEvent::Finished:
     Serial.println("[SCAN] finished");
@@ -529,11 +543,11 @@ void runScanAtBoot() {
                 result.discovered, result.saved, result.duplicates, result.failed);
 
   if (result.failed > 0) {
-    flashAll(CRGB::Red, 3);
+    flashAll(CRGB::Red, 2);
   } else if (result.saved > 0) {
-    flashAll(CRGB::Green, 3);
+    flashAll(CRGB::Green, 2);
   } else {
-    flashAll(CRGB::Yellow, 2);
+    flashAll(CRGB::Orange, 2);
   }
 
   waitButtonRelease();
