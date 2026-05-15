@@ -7,7 +7,6 @@ enum class LiteScanEvent : uint8_t {
   Started,
   Tick,
   Discovered,
-  Duplicate,
   Saved,
   SaveFailed,
   Finished
@@ -18,7 +17,6 @@ using LiteScanFeedback = void (*)(LiteScanEvent event, const TARGETNS *ns);
 struct LiteScanResult {
   uint16_t discovered = 0;
   uint16_t saved = 0;
-  uint16_t duplicates = 0;
   uint16_t failed = 0;
 };
 

@@ -7,6 +7,19 @@
 namespace LiteStorage {
 namespace {
 
+constexpr size_t kNameLen = 32;
+constexpr size_t kDescLen = 192;
+constexpr size_t kSerialLen = 5;
+constexpr size_t kIdLen = 1;
+constexpr size_t kCurrentModeLen = 1;
+
+constexpr size_t kOffsetName = 0;
+constexpr size_t kOffsetDesc = kOffsetName + kNameLen;
+constexpr size_t kOffsetSerial = kOffsetDesc + kDescLen;
+constexpr size_t kOffsetId = kOffsetSerial + kSerialLen;
+constexpr size_t kOffsetCurrentMode = kOffsetId + kIdLen;
+constexpr size_t kMinimumElementFileSize = kOffsetCurrentMode + kCurrentModeLen;
+
 bool isElementFile(const String &path) {
   return path.startsWith("/element_") && path.endsWith(".bin") &&
          path.indexOf("_icon") < 0;
@@ -62,17 +75,17 @@ bool writeZeroes(File &file, size_t count) {
   return true;
 }
 
-} // namespace
-
-bool begin() {
-  return SPIFFS.begin(true);
-}
-
 String targetToHex(const TARGETNS &ns) {
   char buffer[11];
   snprintf(buffer, sizeof(buffer), "%02X%02X%02X%02X%02X", ns.mac01, ns.mac02,
            ns.mac03, ns.mac04, ns.mac05);
   return String(buffer);
+}
+
+} // namespace
+
+bool begin() {
+  return SPIFFS.begin(true);
 }
 
 std::vector<TARGETNS> loadTargets() {
@@ -141,23 +154,9 @@ size_t clearTargets() {
   return removed;
 }
 
-bool targetExists(const TARGETNS &ns) {
-  if (nsIsZero(ns)) {
-    return false;
-  }
-
-  const auto targets = loadTargets();
-  return std::find_if(targets.begin(), targets.end(), [&](const TARGETNS &item) {
-           return nsEquals(item, ns);
-         }) != targets.end();
-}
-
 bool saveMinimalTarget(const TARGETNS &ns) {
   if (nsIsZero(ns)) {
     return false;
-  }
-  if (targetExists(ns)) {
-    return true;
   }
 
   const String hex = targetToHex(ns);

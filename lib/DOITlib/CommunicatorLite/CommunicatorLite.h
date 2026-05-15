@@ -6,11 +6,9 @@
 
 class CommunicatorLite {
 public:
-  void setTargets(const std::vector<TARGETNS> &targets);
   void reloadTargets();
   bool next();
   void sendPassiveAmbient();
-  bool hasTargets() const { return !targets_.empty(); }
   uint8_t activeTargetType() const;
   TARGETNS activeTargetNS() const;
 
@@ -22,9 +20,9 @@ private:
     PassiveAmbient,
   };
 
+  void setTargets(const std::vector<TARGETNS> &targets);
   void sendBlackout(uint8_t targetType, const TARGETNS &targetNS);
-  void sendStart(uint8_t targetType, const TARGETNS &targetNS,
-                 bool includeRelayFlag);
+  void sendStart(uint8_t targetType, const TARGETNS &targetNS);
 
   std::vector<TARGETNS> targets_;
   int currentIndex_ = -1;

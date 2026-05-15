@@ -4,8 +4,6 @@
 #include <WiFi.h>
 #include <driver/gpio.h>
 #include <esp_sleep.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
 
 #include <ADXL345_handler/ADXL345_handler.h>
 #include <CommunicatorLite/CommunicatorLite.h>
@@ -23,12 +21,6 @@ constexpr uint8_t kBuildMonth = 0x01;
 uint16_t SERIAL_NUM =
     (static_cast<uint16_t>(kBuildMonth) << 8) | kFirmwareVersion;
 
-unsigned long lastDisplayInteraction = 0;
-SemaphoreHandle_t uartTxMutex = nullptr;
-bool adxl = true;
-
-extern std::vector<uint8_t> printTargetID;
-
 CRGB leds[NUM_LEDS];
 CommunicatorLite communicator;
 RoomScannerLite scanner;
@@ -36,9 +28,6 @@ RoomScannerLite scanner;
 namespace {
 
 uint32_t lastActivityMs = 0;
-bool buttonStablePressed = false;
-bool buttonLastReading = false;
-uint32_t buttonLastChangeMs = 0;
 bool adxlInt1LastState = false;
 bool relayState = false;
 bool sideReleaseConsumedByRelayLong = false;
@@ -173,7 +162,6 @@ bool adxlInt1SharesRelayPin() {
 
 void markActivity() {
   lastActivityMs = millis();
-  lastDisplayInteraction = lastActivityMs;
 }
 
 const char *batteryStateName(BatteryState state) {
@@ -526,10 +514,6 @@ void scanFeedback(LiteScanEvent event, const TARGETNS *) {
     Serial.println("[SCAN] target saved");
     pulseScanEvent(CRGB::Green, 2);
     break;
-  case LiteScanEvent::Duplicate:
-    Serial.println("[SCAN] target duplicate");
-    pulseScanEvent(CRGB::Yellow, 1);
-    break;
   case LiteScanEvent::SaveFailed:
     Serial.println("[SCAN] target save failed");
     pulseScanEvent(CRGB::Red, 2);
@@ -749,7 +733,6 @@ void initRF() {
   }
   uartBuffer.clear();
   uartBuffer.reserve(MAX_BUFFER_SIZE);
-  printTargetID.reserve(5);
   Serial1.onReceive(onUartInterrupt);
   Serial.printf("[RF] Serial1 begin baud=%lu rxGPIO=%u txGPIO=%u\n",
                 static_cast<unsigned long>(RF_BAUD_RATE), RF_RX_PIN, RF_TX_PIN);
@@ -800,9 +783,6 @@ void waitButtonRelease() {
   while (digitalRead(ENC_BUTTON) == LOW) {
     delay(10);
   }
-  buttonStablePressed = false;
-  buttonLastReading = false;
-  buttonLastChangeMs = millis();
   Serial.printf("[INPUT] SIDE GPIO%u RELEASE @ %lu ms\n", ENC_BUTTON, millis());
 }
 
@@ -830,17 +810,14 @@ bool cycleButtonReleasedForCycle() {
 
   if (rawPressed) {
     stablePressed = true;
-    buttonStablePressed = true;
     return false;
   }
 
   if (!stablePressed) {
-    buttonStablePressed = false;
     return false;
   }
 
   stablePressed = false;
-  buttonStablePressed = false;
   Serial.printf("[INPUT] SIDE GPIO%u RELEASE @ %lu ms\n", ENC_BUTTON, now);
 
   if (sideReleaseConsumedByRelayLong) {
@@ -868,8 +845,8 @@ void runScanAtBoot() {
   Serial.println("ENC_BUTTON held at boot: scanning room.");
   const LiteScanResult result = scanner.scan(scanFeedback);
   communicator.reloadTargets();
-  Serial.printf("Scan finished. discovered=%u saved=%u duplicates=%u failed=%u\n",
-                result.discovered, result.saved, result.duplicates, result.failed);
+  Serial.printf("Scan finished. discovered=%u saved=%u failed=%u\n",
+                result.discovered, result.saved, result.failed);
 
   if (result.failed > 0) {
     flashAll(CRGB::Red, 2);

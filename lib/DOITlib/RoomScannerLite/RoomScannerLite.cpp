@@ -85,12 +85,6 @@ LiteScanResult RoomScannerLite::scan(LiteScanFeedback feedback) {
   }
 
   for (const TARGETNS &ns : discovered) {
-    if (LiteStorage::targetExists(ns)) {
-      result.duplicates++;
-      notify(feedback, LiteScanEvent::Duplicate, &ns);
-      continue;
-    }
-
     if (LiteStorage::saveMinimalTarget(ns)) {
       result.saved++;
       notify(feedback, LiteScanEvent::Saved, &ns);
