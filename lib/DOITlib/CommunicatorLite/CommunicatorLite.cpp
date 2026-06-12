@@ -30,14 +30,23 @@ void CommunicatorLite::sendStart(uint8_t targetType, const TARGETNS &targetNS) {
 }
 
 void CommunicatorLite::sendPassiveAmbient() {
+  const bool targetSelected =
+      cycleState_ == CycleState::TargetStarted && currentIndex_ >= 0 &&
+      currentIndex_ < static_cast<int>(targets_.size());
+  const uint8_t targetType = targetSelected ? DEFAULT_DEVICE : BROADCAST;
+  const TARGETNS targetNS = targetSelected ? targets_[currentIndex_] : NS_ZERO;
+
   send_frame(
-      frameMaker_SEND_COMMAND(DEFAULT_BOTONERA, BROADCAST, NS_ZERO, START_CMD));
+      frameMaker_SEND_COMMAND(DEFAULT_BOTONERA, targetType, targetNS, START_CMD));
   delay(kFrameGapMs);
   send_frame(
-      frameMaker_SEND_PATTERN_NUM(DEFAULT_BOTONERA, BROADCAST, NS_ZERO, 0x09));
+      frameMaker_SEND_PATTERN_NUM(DEFAULT_BOTONERA, targetType, targetNS, 0x09));
   delay(kFrameGapMs);
-  currentIndex_ = -1;
-  cycleState_ = CycleState::PassiveAmbient;
+
+  if (!targetSelected) {
+    currentIndex_ = -1;
+    cycleState_ = CycleState::PassiveAmbient;
+  }
 }
 
 uint8_t CommunicatorLite::activeTargetType() const {
