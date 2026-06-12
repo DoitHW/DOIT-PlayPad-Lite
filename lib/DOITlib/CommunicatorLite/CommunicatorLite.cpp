@@ -29,6 +29,12 @@ void CommunicatorLite::sendStart(uint8_t targetType, const TARGETNS &targetNS) {
   delay(kFrameGapMs);
 }
 
+void CommunicatorLite::sendBroadcastStart() {
+  sendStart(BROADCAST, NS_ZERO);
+  currentIndex_ = -1;
+  cycleState_ = CycleState::BroadcastStarted;
+}
+
 void CommunicatorLite::sendPassiveAmbient() {
   send_frame(
       frameMaker_SEND_COMMAND(DEFAULT_BOTONERA, BROADCAST, NS_ZERO, START_CMD));

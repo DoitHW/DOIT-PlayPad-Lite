@@ -8,6 +8,7 @@ class CommunicatorLite {
 public:
   void reloadTargets();
   bool next();
+  void sendBroadcastStart();
   void sendPassiveAmbient();
   uint8_t activeTargetType() const;
   TARGETNS activeTargetNS() const;

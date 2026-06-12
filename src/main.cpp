@@ -951,6 +951,8 @@ void setup() {
 
   markActivity();
   showDefaultButtons();
+  Serial.println("[COMM] boot: START broadcast");
+  communicator.sendBroadcastStart();
 }
 
 void loop() {
